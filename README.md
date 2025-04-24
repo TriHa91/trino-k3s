@@ -1,0 +1,84 @@
+cd ~/trino-chart
+
+# Create ConfigMaps from your existing configuration files
+# Create ConfigMap for base Trino configuration files
+kubectl create configmap trino-config \
+  --from-file=jvm.config=trino-config/etc/jvm.config \
+  --from-file=node.properties=trino-config/etc/node.properties \
+  --from-file=config.properties=trino-config/etc/config.properties \
+  --from-file=password-authenticator.properties=trino-config/etc/password-authenticator.properties
+
+# Create ConfigMap for private key and password DB
+kubectl create configmap trino-security \
+  --from-file=private_key.pem=trino-config/etc/private_key.pem \
+  --from-file=pwd.db=trino-config/etc/pwd.db
+
+# Create ConfigMap for catalog files
+kubectl create configmap trino-catalog \
+  --from-file=trino-config/etc/catalog/
+
+
+
+
+cat > templates/deployment.yaml << EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-trino
+  labels:
+    {{- include "trino.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-trino
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-trino
+    spec:
+      containers:
+        - name: trino
+          image: "{{ .Values.trino.image.repository }}:{{ .Values.trino.image.tag }}"
+          imagePullPolicy: {{ .Values.trino.image.pullPolicy }}
+          env:
+            - name: TRINO_HOME
+              value: "/etc/trino"
+          ports:
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.trino.resources | nindent 12 }}
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/trino/jvm.config
+              subPath: jvm.config
+            - name: config-volume
+              mountPath: /etc/trino/node.properties
+              subPath: node.properties
+            - name: config-volume
+              mountPath: /etc/trino/config.properties
+              subPath: config.properties
+            - name: config-volume
+              mountPath: /etc/trino/password-authenticator.properties
+              subPath: password-authenticator.properties
+            - name: security-volume
+              mountPath: /etc/trino/private_key.pem
+              subPath: private_key.pem
+            - name: security-volume
+              mountPath: /etc/trino/pwd.db
+              subPath: pwd.db
+            - name: catalog-volume
+              mountPath: /etc/trino/catalog
+      volumes:
+        - name: config-volume
+          configMap:
+            name: trino-config
+        - name: security-volume
+          configMap:
+            name: trino-security
+        - name: catalog-volume
+          configMap:
+            name: trino-catalog
+EOF
